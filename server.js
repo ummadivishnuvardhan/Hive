@@ -1,24 +1,19 @@
-const express = require('express');
+const express = require("express");
 const app = express();
 
-app.get('/', (req, res) => {
-    res.send('Hello World 🚀');
+const userRoutes = require("./routes/userRoutes");
+
+// Middleware to auto-parse frontend JSON POST data
+app.use(express.json()); 
+
+// API Routes
+app.use("/user", userRoutes);
+
+// Root Health Route
+app.get("/", (req, res) => {
+    res.send("Hive Server is running!");
 });
 
-app.get('/profile', (req, res) => {
-    res.send('This is the profile page.');
-});
-
-app.get('/about', (req, res) => {
-    res.send('This is the about page.');
-});
-
-app.get('/contact', (req, res) => {
-    res.send('This is the contact page.');
-});
-
-const PORT = 3000;
-
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// Start Server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
