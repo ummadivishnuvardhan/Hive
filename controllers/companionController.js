@@ -1,24 +1,25 @@
-const { ScanCommand, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { QueryCommand, GetCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { docClient } = require("../config/db");
 
 const TABLE_NAME = "hive_companion";
 
-// Get all companions with filtering, sorting, and pagination
+// Get companions by category using Query with filtering, sorting, and pagination
 exports.getAllCompanions = async (req, res) => {
     try {
         const { q, cat, sort, price_min, price_max, page = 1, limit = 10 } = req.query;
         
-        let filterExpressions = [];
-        let expressionAttributeValues = {};
-        let expressionAttributeNames = {};
-        
-        // Removed strict DynamoDB 'q' filter here, we will do a flexible, case-insensitive filter in Javascript.
-        
-        if (cat) {
-            filterExpressions.push("#category = :cat");
-            expressionAttributeNames["#category"] = "category";
-            expressionAttributeValues[":cat"] = cat;
+        // DynamoDB Query requires a Partition Key. We enforce 'cat' (category) to query against the Category GSI.
+        if (!cat) {
+            return res.status(400).json({ success: false, message: "Category parameter (cat) is required for querying without doing a full table scan." });
         }
+        
+        let expressionAttributeValues = {
+            ":cat": cat
+        };
+        let expressionAttributeNames = {
+            "#category": "category"
+        };
+        let filterExpressions = [];
         
         if (price_min) {
             filterExpressions.push("price >= :price_min");
@@ -31,32 +32,30 @@ exports.getAllCompanions = async (req, res) => {
         }
         
         const params = {
-            TableName: TABLE_NAME
+            TableName: TABLE_NAME,
+            IndexName: "CategoryRatingIndex",
+            KeyConditionExpression: "#category = :cat",
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues
         };
         
         if (filterExpressions.length > 0) {
             params.FilterExpression = filterExpressions.join(" AND ");
-            params.ExpressionAttributeValues = expressionAttributeValues;
-        }
-        
-        if (Object.keys(expressionAttributeNames).length > 0) {
-            params.ExpressionAttributeNames = expressionAttributeNames;
         }
 
-        const command = new ScanCommand(params);
+        // Leveraging the GSI's sort key ('rating') for efficient ordering
+        if (sort === 'rating') {
+            params.ScanIndexForward = false; // Descending order (highest rating first)
+        }
+
+        const command = new QueryCommand(params);
         let response = await docClient.send(command);
         let items = response.Items || [];
 
-        // 1. Flexible Case-Insensitive Search
+        // Flexible Case-Insensitive Search
         if (q) {
             const lowerQ = q.toLowerCase();
             items = items.filter(item => item.name && item.name.toLowerCase().includes(lowerQ));
-        }
-
-        // 2. Apply sorting in memory
-        if (sort === 'rating') {
-             // Assuming descending order for ratings (highest first)
-            items.sort((a, b) => (b.rating || 0) - (a.rating || 0));
         }
 
         // Apply in-memory pagination
